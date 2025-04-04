@@ -82,7 +82,7 @@ int main(int argc, char **argv) {
   std::string path = request_line.substr(first_space + 1, second_space - first_space - 1);
 
   std::string response;
-  if (path == "/index.html") {
+  if (path == "/") {
     response = "HTTP/1.1 200 OK\r\n\r\n";
   } else {
     response = "HTTP/1.1 404 Not Found\r\n\r\n";
