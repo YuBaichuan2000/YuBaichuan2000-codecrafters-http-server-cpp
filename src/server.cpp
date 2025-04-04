@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <sstream>
 
 int main(int argc, char **argv) {
   // Flush after every std::cout / std::cerr
@@ -77,13 +78,23 @@ int main(int argc, char **argv) {
 
   std::cout << "Received request line:\n" << request_line << std::endl;
 
-  size_t first_space = request_line.find(' ');
-  size_t second_space = request_line.find(' ', first_space + 1);
-  std::string path = request_line.substr(first_space + 1, second_space - first_space - 1);
+  std::istringstream iss(request_line);
+  std::string method, path, version;
+  iss >> method >> path >> version;
+  std::string path_prefix = "/echo/";
 
   std::string response;
-  if (path == "/") {
+
+  // first check if path start with /echo/
+  if (path.compare(0, path_prefix.length(), path_prefix) == 0) {
+    std::string echo_value = path.substr(path_prefix.length());
+
     response = "HTTP/1.1 200 OK\r\n\r\n";
+    response += "Content-Type: text/plain\r\n";
+    response += "Content-Length: " + std::to_string(echo_value.length()) + "\r\n";
+    response += "\r\n";
+    response += echo_value;
+
   } else {
     response = "HTTP/1.1 404 Not Found\r\n\r\n";
   }
