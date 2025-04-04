@@ -95,6 +95,8 @@ int main(int argc, char **argv) {
     response += "\r\n";
     response += echo_value;
 
+  } else if (path == "/") {
+    response = "HTTP/1.1 200 OK\r\n\r\n";
   } else {
     response = "HTTP/1.1 404 Not Found\r\n\r\n";
   }
