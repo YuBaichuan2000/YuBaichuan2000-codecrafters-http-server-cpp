@@ -8,8 +8,6 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
-using namespace std;
-
 int main(int argc, char **argv) {
   // Flush after every std::cout / std::cerr
   std::cout << std::unitbuf;
@@ -38,7 +36,7 @@ int main(int argc, char **argv) {
   server_addr.sin_addr.s_addr = INADDR_ANY;
   server_addr.sin_port = htons(4221);
   
-  if (bind(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) != 0) {
+  if (bind(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
     std::cerr << "Failed to bind to port 4221\n";
     return 1;
   }
@@ -65,14 +63,33 @@ int main(int argc, char **argv) {
 
   int bytes_read = read(client_fd, buf, sizeof(buf)-1);
   if (bytes_read < 0) {
-    cerr << "Failed to read from client" << endl;
+    std::cerr << "Failed to read from client" << std::endl;
     close(client_fd);
     return 1;
   }
 
-  cout << "Received request:\n" << buf << endl;
+  std::cout << "Received request:\n" << buf << std::endl;
 
-  string response = "HTTP/1.1 200 OK\r\n\r\n";
+  std::string request(buf);
+
+  size_t end = request.find("\r\n");
+  std::string request_line = request.substr(0, end);
+
+  std::cout << "Received request line:\n" << request_line << std::endl;
+
+  size_t first_space = request_line.find(' ');
+  size_t second_space = request_line.find(' ', first_space + 1);
+  std::string path = request_line.substr(first_space + 1, second_space - first_space - 1);
+
+  std::string response;
+  if (path == "/index.html") {
+    response = "HTTP/1.1 200 OK\r\n\r\n";
+  } else {
+    response = "HTTP/1.1 404 Not Found\r\n\r\n";
+  }
+
+
+  
 
   int bytes_sent = write(client_fd, response.c_str(), response.length());
   if (bytes_sent < 0) {
