@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
   if (path.compare(0, path_prefix.length(), path_prefix) == 0) {
     std::string echo_value = path.substr(path_prefix.length());
 
-    response = "HTTP/1.1 200 OK\r\n\r\n";
+    response = "HTTP/1.1 200 OK\r\n";
     response += "Content-Type: text/plain\r\n";
     response += "Content-Length: " + std::to_string(echo_value.length()) + "\r\n";
     response += "\r\n";
