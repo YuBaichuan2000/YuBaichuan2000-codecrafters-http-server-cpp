@@ -13,6 +13,7 @@
 #include <assert.h>
 #include <map>
 #include <fstream>
+#include <zlib.h>
 
 std::string g_directory = "/tmp"; 
 
@@ -132,8 +133,48 @@ bool get_encoding(std::string request) {
     return true;
   } 
   return false;
-  
 }
+
+std::string compress_gzip(const std::string& data) {
+    z_stream zs;
+    memset(&zs, 0, sizeof(zs));
+    
+    // Initialize for gzip compression
+    // 15 is the window size, +16 tells zlib to create a gzip header/trailer
+    if (deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+        std::cerr << "deflateInit2 failed" << std::endl;
+        return data; // Return original data on failure
+    }
+    
+    zs.next_in = (Bytef*)data.data();
+    zs.avail_in = data.size();
+    
+    int ret;
+    char outbuffer[32768];
+    std::string compressed;
+    
+    // Compress the data
+    do {
+        zs.next_out = reinterpret_cast<Bytef*>(outbuffer);
+        zs.avail_out = sizeof(outbuffer);
+        
+        ret = deflate(&zs, Z_FINISH);
+        
+        if (compressed.size() < zs.total_out) {
+            compressed.append(outbuffer, zs.total_out - compressed.size());
+        }
+    } while (ret == Z_OK);
+    
+    deflateEnd(&zs);
+    
+    if (ret != Z_STREAM_END) {
+        std::cerr << "Compression error: " << ret << std::endl;
+        return data; // Return original data on error
+    }
+    
+    return compressed;
+}
+
 
 std::string get_method(std::string request) {
   std::vector<std::string> toks = split_message(request, "\r\n");
@@ -198,7 +239,7 @@ std::string generate_response(const std::string& client_msg) {
         std::string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
         
         if (supports_gzip) {
-          // content = compress_gzip(content);
+          content = compress_gzip(content);
           headers += "Content-Encoding: gzip\r\n";
         }
         
@@ -218,7 +259,7 @@ std::string generate_response(const std::string& client_msg) {
         std::string headers = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n";
         
         if (supports_gzip) {
-          // content = compress_gzip(content);
+          content = compress_gzip(content);
           headers += "Content-Encoding: gzip\r\n";
         }
         
@@ -230,7 +271,7 @@ std::string generate_response(const std::string& client_msg) {
       std::string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
       
       if (supports_gzip) {
-        // content = compress_gzip(content);
+        content = compress_gzip(content);
         headers += "Content-Encoding: gzip\r\n";
       }
       
