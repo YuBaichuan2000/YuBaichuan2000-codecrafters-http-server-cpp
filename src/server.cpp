@@ -117,6 +117,19 @@ std::string get_agent(std::string request) {
   return agent;
 }
 
+std::string get_encoding(std::string request) {
+  std::vector<std::string> toks = split_message(request, "\r\n");
+  std::string encoding;
+
+  for (std::string tok : toks) {
+    if (tok.find("Accept-Encoding: ") == 0) {
+      encoding = tok.substr(17);
+      break;
+    }
+  }
+  return encoding;
+}
+
 std::string get_method(std::string request) {
   std::vector<std::string> toks = split_message(request, "\r\n");
 
@@ -165,6 +178,8 @@ std::string generate_response(const std::string& client_msg) {
   std::string path = get_path(client_msg);
   std::string agent = get_agent(client_msg);
   std::string method = get_method(client_msg);
+  std::string encoding = get_encoding(client_msg);
+  bool supports_gzip = encoding == "gzip";
   std::vector<std::string> split_paths = split_message(path, "/");
   
   std::cout << "Received path: " << path << std::endl;
@@ -175,8 +190,16 @@ std::string generate_response(const std::string& client_msg) {
       return "HTTP/1.1 200 OK\r\n\r\n";
     } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
       if (split_paths.size() > 2) {
-        return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
-              + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
+        std::string content = split_paths[2];
+        std::string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
+        
+        if (supports_gzip) {
+          // content = compress_gzip(content);
+          headers += "Content-Encoding: gzip\r\n";
+        }
+        
+        headers += "Content-Length: " + std::to_string(content.length()) + "\r\n\r\n";
+        return headers + content;
       } else {
         return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
       }
@@ -187,12 +210,28 @@ std::string generate_response(const std::string& client_msg) {
         if (content.empty()) {
           return "HTTP/1.1 404 Not Found\r\n\r\n";
         }
-        return "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " 
-              + std::to_string(content.length()) + "\r\n\r\n" + content;
+        
+        std::string headers = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n";
+        
+        if (supports_gzip) {
+          // content = compress_gzip(content);
+          headers += "Content-Encoding: gzip\r\n";
+        }
+        
+        headers += "Content-Length: " + std::to_string(content.length()) + "\r\n\r\n";
+        return headers + content;
       } 
     } else if (split_paths.size() > 1 && split_paths[1] == "user-agent") {
-      return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
-            + std::to_string(agent.length()) + "\r\n\r\n" + agent;
+      std::string content = agent;
+      std::string headers = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
+      
+      if (supports_gzip) {
+        // content = compress_gzip(content);
+        headers += "Content-Encoding: gzip\r\n";
+      }
+      
+      headers += "Content-Length: " + std::to_string(content.length()) + "\r\n\r\n";
+      return headers + content;
     } else {
       return "HTTP/1.1 404 Not Found\r\n\r\n";
     }
@@ -207,10 +246,9 @@ std::string generate_response(const std::string& client_msg) {
         if (write_file(filename, content)) {
           return "HTTP/1.1 201 Created\r\n\r\n";
         } 
-    } 
+      } 
+    }
   }
-  }
-  
 }
 
 bool try_process_request(Conn* conn) {
