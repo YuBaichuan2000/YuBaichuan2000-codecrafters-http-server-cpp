@@ -7,7 +7,40 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <vector>
 #include <sstream>
+
+std::vector<std::string> split_message(const std::string &message, const std::string& delim) {
+  std::vector<std::string> tokens;
+  std::stringstream ss = std::stringstream{message};
+  std::string line;
+  while (getline(ss, line, *delim.begin())) {
+    tokens.push_back(line);
+    ss.ignore(delim.length() - 1);
+  }
+  return tokens;
+}
+
+std::string get_path(std::string request) {
+  std::vector<std::string> toks = split_message(request, "\r\n");
+  std::vector<std::string> path_toks = split_message(toks[0], " ");
+  return path_toks[1];
+}
+
+std::string get_agent(std::string request) {
+  std::vector<std::string> toks = split_message(request, "\r\n");
+  std::string agent;
+
+  for (std::string tok : toks) {
+    if (tok.find("User-Agent: ") == 0) {
+      agent = tok.substr(12);
+      break;
+    }
+  }
+  return agent;
+}
+
+
 
 int main(int argc, char **argv) {
   // Flush after every std::cout / std::cerr
@@ -60,48 +93,37 @@ int main(int argc, char **argv) {
   std::cout << "Client connected\n";
 
   // Read the HTTP request
-  char buf[1024] = {0};
+  char buffer[1024] = {0};
 
-  int bytes_read = read(client_fd, buf, sizeof(buf)-1);
+  int bytes_read = read(client_fd, buffer, sizeof(buffer)-1);
+
   if (bytes_read < 0) {
     std::cerr << "Failed to read from client" << std::endl;
     close(client_fd);
     return 1;
   }
 
-  std::cout << "Received request:\n" << buf << std::endl;
+  std::string client_msg(buffer);
 
-  std::string request(buf);
+  std::cout << "Received request:\n" << client_msg << std::endl;
 
-  size_t end = request.find("\r\n");
-  std::string request_line = request.substr(0, end);
-
-  std::cout << "Received request line:\n" << request_line << std::endl;
-
-  std::istringstream iss(request_line);
-  std::string method, path, version;
-  iss >> method >> path >> version;
-  std::string path_prefix = "/echo/";
-
+  std::string path = get_path(client_msg);
+  std::string agent = get_agent(client_msg);
+  std::vector<std::string> split_paths = split_message(path, "/");
   std::string response;
 
-  // first check if path start with /echo/
-  if (path.compare(0, path_prefix.length(), path_prefix) == 0) {
-    std::string echo_value = path.substr(path_prefix.length());
+  std::cout << "Received path:\n" << path << std::endl;
+  std::cout << "Received agent:\n" << agent << std::endl;
 
-    response = "HTTP/1.1 200 OK\r\n";
-    response += "Content-Type: text/plain\r\n";
-    response += "Content-Length: " + std::to_string(echo_value.length()) + "\r\n";
-    response += "\r\n";
-    response += echo_value;
-
-  } else if (path == "/") {
-    response = "HTTP/1.1 200 OK\r\n\r\n";
-  } else {
-    response = "HTTP/1.1 404 Not Found\r\n\r\n";
-  }
-
-
+  if (path == "/") {
+      response = "HTTP/1.1 200 OK\r\n\r\n";
+    } else if (split_paths[1] == "echo") {
+      response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
+    } else if (split_paths[1] == "user-agent"){
+      response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(agent.length()) + "\r\n\r\n" + agent;
+    } else {
+      response = "HTTP/1.1 404 Not Found\r\n\r\n";
+    }
   
 
   int bytes_sent = write(client_fd, response.c_str(), response.length());
