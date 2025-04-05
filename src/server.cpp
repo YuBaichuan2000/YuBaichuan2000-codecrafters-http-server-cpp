@@ -40,6 +40,75 @@ std::string get_agent(std::string request) {
   return agent;
 }
 
+// Function to accept a client connection
+int accept_client(int server_fd) {
+  struct sockaddr_in client_addr;
+  int client_addr_len = sizeof(client_addr);
+  
+  std::cout << "Waiting for a client to connect...\n";
+  
+  int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
+  if (client_fd < 0) {
+    std::cerr << "Failed to accept connection" << std::endl;
+    return -1;
+  }
+  
+  std::cout << "Client connected\n";
+  return client_fd;
+}
+
+// Function to read and parse the client request
+std::string handle_read(int client_fd) {
+  char buffer[1024] = {0};
+  
+  int bytes_read = read(client_fd, buffer, sizeof(buffer)-1);
+  
+  if (bytes_read < 0) {
+    std::cerr << "Failed to read from client" << std::endl;
+    return "";
+  }
+  
+  std::string client_msg(buffer);
+  std::cout << "Received request:\n" << client_msg << std::endl;
+  
+  return client_msg;
+}
+
+// Function to generate a response based on the request
+std::string generate_response(const std::string& client_msg) {
+  std::string path = get_path(client_msg);
+  std::string agent = get_agent(client_msg);
+  std::vector<std::string> split_paths = split_message(path, "/");
+  
+  std::cout << "Received path: " << path << std::endl;
+  std::cout << "Received agent: " << agent << std::endl;
+  
+  if (path == "/") {
+    return "HTTP/1.1 200 OK\r\n\r\n";
+  } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
+    if (split_paths.size() > 2) {
+      return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
+             + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
+    } else {
+      return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
+    }
+  } else if (split_paths.size() > 1 && split_paths[1] == "user-agent") {
+    return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
+           + std::to_string(agent.length()) + "\r\n\r\n" + agent;
+  } else {
+    return "HTTP/1.1 404 Not Found\r\n\r\n";
+  }
+}
+
+// Function to send the response to the client
+bool handle_write(int client_fd, const std::string& response) {
+  int bytes_sent = write(client_fd, response.c_str(), response.length());
+  if (bytes_sent < 0) {
+    std::cerr << "Failed to send response\n";
+    return false;
+  }
+  return true;
+}
 
 
 int main(int argc, char **argv) {
@@ -81,61 +150,36 @@ int main(int argc, char **argv) {
     return 1;
   }
   
-  struct sockaddr_in client_addr;
-  int client_addr_len = sizeof(client_addr);
-  
-  std::cout << "Waiting for a client to connect...\n";
-  
-  int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
-  if (client_fd < 0) {
-    std::cerr << "Failed to accept connection" << std::endl;
-  }
-  std::cout << "Client connected\n";
-
-  // Read the HTTP request
-  char buffer[1024] = {0};
-
-  int bytes_read = read(client_fd, buffer, sizeof(buffer)-1);
-
-  if (bytes_read < 0) {
-    std::cerr << "Failed to read from client" << std::endl;
-    close(client_fd);
-    return 1;
-  }
-
-  std::string client_msg(buffer);
-
-  std::cout << "Received request:\n" << client_msg << std::endl;
-
-  std::string path = get_path(client_msg);
-  std::string agent = get_agent(client_msg);
-  std::vector<std::string> split_paths = split_message(path, "/");
-  std::string response;
-
-  std::cout << "Received path:\n" << path << std::endl;
-  std::cout << "Received agent:\n" << agent << std::endl;
-
-  if (path == "/") {
-      response = "HTTP/1.1 200 OK\r\n\r\n";
-    } else if (split_paths[1] == "echo") {
-      response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
-    } else if (split_paths[1] == "user-agent"){
-      response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(agent.length()) + "\r\n\r\n" + agent;
-    } else {
-      response = "HTTP/1.1 404 Not Found\r\n\r\n";
+  // Accept concurrent client connections
+  while (true) {
+    int client_fd = accept_client(server_fd);
+    if (client_fd < 0) {
+      close(server_fd);
+      return 1;
     }
-  
-
-  int bytes_sent = write(client_fd, response.c_str(), response.length());
-  if (bytes_sent < 0) {
-    std::cerr << "Failed to send response\n";
+    
+    // Read and parse client request
+    std::string client_msg = handle_read(client_fd);
+    if (client_msg.empty()) {
+      close(client_fd);
+      close(server_fd);
+      return 1;
+    }
+    
+    // Generate response
+    std::string response = generate_response(client_msg);
+    
+    // Send response to client
+    if (!handle_write(client_fd, response)) {
+      close(client_fd);
+      return 1;
+    }
+    
+    // Clean up
+    close(client_fd);
   }
-
-  // Clean up
-  close(client_fd);
-
   
   close(server_fd);
-
+  
   return 0;
 }
