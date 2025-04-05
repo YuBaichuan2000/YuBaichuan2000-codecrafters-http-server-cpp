@@ -11,21 +11,39 @@
 #include <netdb.h>
 #include <sstream>
 #include <assert.h>
+#include <map> // Added for using a map instead of a vector for connections
 
 std::vector<std::string> split_message(const std::string &message, const std::string& delim) {
   std::vector<std::string> tokens;
+  // Check for empty inputs to prevent processing errors
+  if (message.empty() || delim.empty()) {
+    return tokens;
+  }
+  
   std::stringstream ss = std::stringstream{message};
   std::string line;
   while (getline(ss, line, *delim.begin())) {
     tokens.push_back(line);
-    ss.ignore(delim.length() - 1);
+    // Only ignore if not at EOF
+    if (!ss.eof()) {
+      ss.ignore(delim.length() - 1);
+    }
   }
   return tokens;
 }
 
 std::string get_path(std::string request) {
+  // Added safety checks
   std::vector<std::string> toks = split_message(request, "\r\n");
+  if (toks.empty()) {
+    return "/"; // Default path if no request line
+  }
+  
   std::vector<std::string> path_toks = split_message(toks[0], " ");
+  if (path_toks.size() < 2) {
+    return "/"; // Default path if no path token
+  }
+  
   return path_toks[1];
 }
 
@@ -93,96 +111,136 @@ std::string generate_response(const std::string& client_msg) {
 }
 
 bool try_process_request(Conn* conn) {
+  // Check if conn is valid
+  if (!conn) {
+    return false;
+  }
+
+  // Check if we have a complete HTTP request
   size_t header_end = conn->incoming.find("\r\n\r\n");
+  if (header_end == std::string::npos) {
+    return false; // Need more data
+  }
 
   // We have a complete HTTP request
-    std::string request = conn->incoming;
+  std::string request = conn->incoming;
 
-    std::string response = generate_response(request);
-    conn->outgoing += response;
+  std::string response = generate_response(request);
+  conn->outgoing += response;
 
-    conn->want_read = false;
-    conn->want_write = true;
+  conn->want_read = false;
+  conn->want_write = true;
 
-    conn->incoming.clear();
-    return true;
+  conn->incoming.clear();
+  return true;
 }
 
 // Function to read and parse the client request
 void handle_read(Conn* conn) {
-  char buffer[1024] = {0};
-  
-  int bytes_read = read(conn->fd, buffer, sizeof(buffer)-1);
-  
-  if (bytes_read < 0) {
-    std::cerr << "Failed to read from client" << std::endl;
+  // Check if conn is valid
+  if (!conn) {
     return;
   }
 
+  char buffer[4096] = {0}; // Increased buffer size
+  
+  int bytes_read = read(conn->fd, buffer, sizeof(buffer)-1);
+  
+  if (bytes_read <= 0) {
+    if (bytes_read < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      // Not ready, not an error
+      return;
+    }
+    
+    // Error or client disconnected
+    if (bytes_read < 0) {
+      std::cerr << "Failed to read from client: " << strerror(errno) << std::endl;
+    } else {
+      std::cout << "Client disconnected" << std::endl;
+    }
+    
+    conn->want_close = true;
+    return;
+  }
+
+  // Append data to buffer
   conn->incoming.append(buffer, bytes_read);
 
-  std::string client_msg(buffer);
-  std::cout << "Received request:\n" << client_msg << std::endl;
+  std::cout << "Received request:\n" << buffer << std::endl;
 
   try_process_request(conn);
 }
 
-
-
 // Function to send the response to the client
 void handle_write(Conn* conn) {
+  // Check if conn is valid
+  if (!conn) {
+    return;
+  }
+
   if (conn->outgoing.empty()) {
-        conn->want_write = false;
-        conn->want_read = true;  // Ready to read the next request
-        return;
+    conn->want_write = false;
+    conn->want_read = true;  // Ready to read the next request
+    return;
   }
 
   int bytes_sent = write(conn->fd, conn->outgoing.c_str(), conn->outgoing.size());
   if (bytes_sent < 0) {
-    std::cerr << "Failed to send response\n";
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      // Not ready to write
+      return;
+    }
+    
+    std::cerr << "Failed to send response: " << strerror(errno) << std::endl;
+    conn->want_close = true;
     return;
   }
+  
   // Remove sent data from buffer
   conn->outgoing.erase(0, bytes_sent);
 
   if (conn->outgoing.empty()) {
-        conn->want_write = false;
-        conn->want_read = true;
+    conn->want_write = false;
+    conn->want_read = true;
   }
-
 }
 
 // Function to accept a client connection
 Conn* accept_client(int server_fd) {
   struct sockaddr_in client_addr;
-    socklen_t client_addr_len = sizeof(client_addr);
+  socklen_t client_addr_len = sizeof(client_addr);
+  
+  // Initialize to zero
+  memset(&client_addr, 0, sizeof(client_addr));
     
-    int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addr_len);
+  int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_addr_len);
     
-    if (client_fd < 0) {
-        std::cerr << "Accept error: " << strerror(errno) << std::endl;
-        return nullptr;
+  if (client_fd < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      // No connections waiting
+      return nullptr;
     }
+    std::cerr << "Accept error: " << strerror(errno) << std::endl;
+    return nullptr;
+  }
     
-    // Print client information
-    char client_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
-    std::cout << "New connection from " << client_ip << ":" << ntohs(client_addr.sin_port) << std::endl;
+  // Print client information
+  char client_ip[INET_ADDRSTRLEN];
+  inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
+  std::cout << "New connection from " << client_ip << ":" << ntohs(client_addr.sin_port) << std::endl;
     
-    // Set client socket to non-blocking mode
-    set_nonblocking(client_fd);
+  // Set client socket to non-blocking mode
+  set_nonblocking(client_fd);
     
-    // Create and return new connection
-    return new Conn(client_fd);
+  // Create and return new connection
+  return new Conn(client_fd);
 }
-
 
 int main(int argc, char **argv) {
   // Flush after every std::cout / std::cerr
   std::cout << std::unitbuf;
   std::cerr << std::unitbuf;
   
-  // You can use print statements as follows for debugging, they'll be visible when running tests.
   std::cout << "Logs from your program will appear here!\n";
 
   // TCP connection
@@ -191,9 +249,9 @@ int main(int argc, char **argv) {
    std::cerr << "Failed to create server socket\n";
    return 1;
   }
-  //
-  // // Since the tester restarts your program quite often, setting SO_REUSEADDR
-  // // ensures that we don't run into 'Address already in use' errors
+  
+  // Since the tester restarts your program quite often, setting SO_REUSEADDR
+  // ensures that we don't run into 'Address already in use' errors
   int reuse = 1;
   if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
     std::cerr << "setsockopt failed\n";
@@ -201,6 +259,7 @@ int main(int argc, char **argv) {
   }
   
   struct sockaddr_in server_addr;
+  memset(&server_addr, 0, sizeof(server_addr)); // Initialize properly
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = INADDR_ANY;
   server_addr.sin_port = htons(4221);
@@ -218,8 +277,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // Connection management
-  std::vector<Conn*> conns;
+  // Changed from vector to map for safer access by file descriptor
+  std::map<int, Conn*> fd_to_conn;
   
   // Accept concurrent client connections
   while (true) {
@@ -229,65 +288,84 @@ int main(int argc, char **argv) {
     struct pollfd server_pfd = {server_fd, POLLIN, 0};
     poll_fds.push_back(server_pfd);
 
-    for (size_t i = 0; i < conns.size(); i++) {
-        Conn* conn = conns[i];
-        if (!conn) continue;  // Skip null connections
-        
-        struct pollfd pfd = {conn->fd, 0, 0};
-        
-        // Set poll events based on connection state
-        if (conn->want_read) pfd.events |= POLLIN;
-        if (conn->want_write) pfd.events |= POLLOUT;
-        
-        // Always check for errors
-        pfd.events |= POLLERR;
-        
-        poll_fds.push_back(pfd);
+    // Add all active client connections
+    for (const auto& pair : fd_to_conn) {
+      int fd = pair.first;
+      Conn* conn = pair.second;
+      
+      if (!conn) continue; // Skip null connections
+      
+      struct pollfd pfd = {fd, 0, 0};
+      
+      // Set poll events based on connection state
+      if (conn->want_read) pfd.events |= POLLIN;
+      if (conn->want_write) pfd.events |= POLLOUT;
+      
+      // Always check for errors
+      pfd.events |= POLLERR;
+      
+      poll_fds.push_back(pfd);
     }
 
     // Wait for events
     int ready = poll(poll_fds.data(), poll_fds.size(), -1);
+    if (ready < 0) {
+      if (errno == EINTR) continue; // Interrupted, retry
+      std::cerr << "poll() error: " << strerror(errno) << std::endl;
+      break;
+    }
 
     // Check server socket
     if (poll_fds[0].revents & POLLIN) {
-        Conn* new_conn = accept_client(server_fd);
-        if (new_conn) {
-            // put it into the map
-            if (conns.size() <= (size_t)new_conn->fd) {
-                conns.resize(new_conn->fd + 1);
-            }
-            assert(!conns[new_conn->fd]);
-            conns[new_conn->fd] = new_conn;
-        }
+      Conn* new_conn = accept_client(server_fd);
+      if (new_conn) {
+        fd_to_conn[new_conn->fd] = new_conn;
+      }
     }
 
     // Check client connections (start from index 1 to skip server socket)
     for (size_t i = 1; i < poll_fds.size(); i++) {
-        struct pollfd& pfd = poll_fds[i];
-        if (pfd.revents == 0) continue;  // No events for this fd
-        
-        // Find the corresponding connection
-        Conn *conn = conns[poll_fds[i].fd];
-        
-        // Handle readable socket
-        if (pfd.revents & POLLIN) {
-            handle_read(conn);
-        }
-        
-        // Handle writable socket
-        if (pfd.revents & POLLOUT) {
-            handle_write(conn);
-        }
-        
-        // Handle errors or close request
-        if ((pfd.revents & POLLERR) || conn->want_close) {
-            // Close the connection
-            (void)close(conn->fd);
-            conns[conn->fd] = NULL;
-            delete conn;
-        }
+      struct pollfd& pfd = poll_fds[i];
+      if (pfd.revents == 0) continue; // No events for this fd
+      
+      // Find the corresponding connection
+      auto it = fd_to_conn.find(pfd.fd);
+      if (it == fd_to_conn.end()) {
+        continue; // Connection not found
+      }
+      
+      Conn* conn = it->second;
+      if (!conn) {
+        fd_to_conn.erase(it);
+        continue; // Skip null connection
+      }
+      
+      // Handle readable socket
+      if (pfd.revents & POLLIN) {
+        handle_read(conn);
+      }
+      
+      // Handle writable socket
+      if (pfd.revents & POLLOUT) {
+        handle_write(conn);
+      }
+      
+      // Handle errors or close request
+      if ((pfd.revents & POLLERR) || conn->want_close) {
+        // Close the connection
+        close(pfd.fd);
+        delete conn;
+        fd_to_conn.erase(pfd.fd);
+      }
     }
   }
   
+  // Clean up
+  for (auto& pair : fd_to_conn) {
+    close(pair.second->fd);
+    delete pair.second;
+  }
+  
+  close(server_fd);
   return 0;
 }
