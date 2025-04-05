@@ -42,12 +42,12 @@ std::string get_path(std::string request) {
     return "/"; // Default path if no request line
   }
   
-  std::vector<std::string> path_toks = split_message(toks[0], " ");
-  if (path_toks.size() < 2) {
+  std::vector<std::string> req_toks = split_message(toks[0], " ");
+  if (req_toks.size() < 2) {
     return "/"; // Default path if no path token
   }
   
-  return path_toks[1];
+  return req_toks[1];
 }
 
 std::string get_file(std::string request) {
@@ -78,6 +78,32 @@ std::string get_file(std::string request) {
   return buffer.str();
 }
 
+bool write_file(const std::string& filename, const std::string& content) {
+  // Construct the full file path
+  std::string filepath = g_directory + "/" + filename;
+  
+  std::cout << "Writing file to: " << filepath << std::endl;
+  
+  // Open the file for writing
+  std::ofstream file(filepath, std::ios::binary);
+  if (!file) {
+    std::cerr << "Could not open file for writing: " << filepath << std::endl;
+    return false;
+  }
+  
+  // Write the content
+  file << content;
+  
+  // Check if the write operation was successful
+  if (!file) {
+    std::cerr << "Error writing to file: " << filepath << std::endl;
+    return false;
+  }
+  
+  file.close();
+  return true;
+}
+
 std::string get_agent(std::string request) {
   std::vector<std::string> toks = split_message(request, "\r\n");
   std::string agent;
@@ -89,6 +115,25 @@ std::string get_agent(std::string request) {
     }
   }
   return agent;
+}
+
+std::string get_method(std::string request) {
+  std::vector<std::string> toks = split_message(request, "\r\n");
+
+  std::vector<std::string> req_toks = split_message(toks[0], " ");
+
+  return req_toks[0];
+}
+
+std::string get_request_body(const std::string& request) {
+  // Find the end of headers
+  size_t header_end = request.find("\r\n\r\n");
+  if (header_end == std::string::npos) {
+    return "";
+  }
+  
+  // The body starts after the headers
+  return request.substr(header_end + 4);
 }
 
 // set socket to non-blocking mode
@@ -119,36 +164,53 @@ struct Conn {
 std::string generate_response(const std::string& client_msg) {
   std::string path = get_path(client_msg);
   std::string agent = get_agent(client_msg);
+  std::string method = get_method(client_msg);
   std::vector<std::string> split_paths = split_message(path, "/");
   
   std::cout << "Received path: " << path << std::endl;
   std::cout << "Received agent: " << agent << std::endl;
-  
-  if (path == "/") {
-    return "HTTP/1.1 200 OK\r\n\r\n";
-  } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
-    if (split_paths.size() > 2) {
-      return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
-             + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
-    } else {
-      return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
-    }
-  } else if (split_paths.size() > 1 && split_paths[1] == "files") {
-    if (split_paths.size() > 2) {
-      // This is a file request
-      std::string content = get_file(client_msg);
-      if (content.empty()) {
-        return "HTTP/1.1 404 Not Found\r\n\r\n";
+
+  if (method == "GET") {
+    if (path == "/") {
+      return "HTTP/1.1 200 OK\r\n\r\n";
+    } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
+      if (split_paths.size() > 2) {
+        return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
+              + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
+      } else {
+        return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
       }
-      return "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " 
-             + std::to_string(content.length()) + "\r\n\r\n" + content;
+    } else if (split_paths.size() > 1 && split_paths[1] == "files") {
+      if (split_paths.size() > 2) {
+        // This is a file request
+        std::string content = get_file(client_msg);
+        if (content.empty()) {
+          return "HTTP/1.1 404 Not Found\r\n\r\n";
+        }
+        return "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " 
+              + std::to_string(content.length()) + "\r\n\r\n" + content;
+      } 
+    } else if (split_paths.size() > 1 && split_paths[1] == "user-agent") {
+      return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
+            + std::to_string(agent.length()) + "\r\n\r\n" + agent;
+    } else {
+      return "HTTP/1.1 404 Not Found\r\n\r\n";
+    }
+  } else if (method == "POST") {
+    if (split_paths.size() > 1 && split_paths[1] == "files") {
+      if (split_paths.size() > 2) {
+        // This is a file upload request
+        std::string filename = path.substr(7);  // Remove "/files/" prefix
+        std::string content = get_request_body(client_msg);
+        
+        // Write the content to the file
+        if (write_file(filename, content)) {
+          return "HTTP/1.1 201 Created\r\n\r\n";
+        } 
     } 
-  } else if (split_paths.size() > 1 && split_paths[1] == "user-agent") {
-    return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
-           + std::to_string(agent.length()) + "\r\n\r\n" + agent;
-  } else {
-    return "HTTP/1.1 404 Not Found\r\n\r\n";
   }
+  }
+  
 }
 
 bool try_process_request(Conn* conn) {
