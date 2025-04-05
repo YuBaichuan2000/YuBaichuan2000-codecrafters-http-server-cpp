@@ -14,6 +14,8 @@
 #include <map>
 #include <fstream>
 
+std::string g_directory = "/tmp"; 
+
 std::vector<std::string> split_message(const std::string &message, const std::string& delim) {
   std::vector<std::string> tokens;
   // Check for empty inputs to prevent processing errors
@@ -61,7 +63,7 @@ std::string get_file(std::string request) {
   }
 
   std::string filename = path_toks[1].substr(7);
-  std::string filepath = "/tmp/" + filename;
+  std::string filepath = g_directory + "/" + filename;
 
   // Read and return the file content
   std::ifstream file(filepath, std::ios::binary);
@@ -281,6 +283,19 @@ int main(int argc, char **argv) {
   std::cerr << std::unitbuf;
   
   std::cout << "Logs from your program will appear here!\n";
+
+  // Parse the directory argument
+  std::string directory = "/tmp"; // Default directory
+  for (int i = 1; i < argc; i++) {
+    if (std::string(argv[i]) == "--directory" && i + 1 < argc) {
+      directory = argv[i+1];
+      break;
+    }
+  }
+
+  g_directory = directory;
+
+  std::cout << "Using directory: " << g_directory << std::endl;
 
   // TCP connection
   int server_fd = socket(AF_INET, SOCK_STREAM, 0);
