@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sstream>
+#include <assert.h>
 
 std::vector<std::string> split_message(const std::string &message, const std::string& delim) {
   std::vector<std::string> tokens;
@@ -65,6 +66,32 @@ struct Conn {
     Conn(int socket_fd) : fd(socket_fd) {}
 };
 
+// Function to generate a response based on the request
+std::string generate_response(const std::string& client_msg) {
+  std::string path = get_path(client_msg);
+  std::string agent = get_agent(client_msg);
+  std::vector<std::string> split_paths = split_message(path, "/");
+  
+  std::cout << "Received path: " << path << std::endl;
+  std::cout << "Received agent: " << agent << std::endl;
+  
+  if (path == "/") {
+    return "HTTP/1.1 200 OK\r\n\r\n";
+  } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
+    if (split_paths.size() > 2) {
+      return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
+             + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
+    } else {
+      return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
+    }
+  } else if (split_paths.size() > 1 && split_paths[1] == "user-agent") {
+    return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
+           + std::to_string(agent.length()) + "\r\n\r\n" + agent;
+  } else {
+    return "HTTP/1.1 404 Not Found\r\n\r\n";
+  }
+}
+
 bool try_process_request(Conn* conn) {
   size_t header_end = conn->incoming.find("/r/n/r/n");
 
@@ -100,31 +127,7 @@ void handle_read(Conn* conn) {
   try_process_request(conn);
 }
 
-// Function to generate a response based on the request
-std::string generate_response(const std::string& client_msg) {
-  std::string path = get_path(client_msg);
-  std::string agent = get_agent(client_msg);
-  std::vector<std::string> split_paths = split_message(path, "/");
-  
-  std::cout << "Received path: " << path << std::endl;
-  std::cout << "Received agent: " << agent << std::endl;
-  
-  if (path == "/") {
-    return "HTTP/1.1 200 OK\r\n\r\n";
-  } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
-    if (split_paths.size() > 2) {
-      return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
-             + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
-    } else {
-      return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
-    }
-  } else if (split_paths.size() > 1 && split_paths[1] == "user-agent") {
-    return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
-           + std::to_string(agent.length()) + "\r\n\r\n" + agent;
-  } else {
-    return "HTTP/1.1 404 Not Found\r\n\r\n";
-  }
-}
+
 
 // Function to send the response to the client
 void handle_write(Conn* conn) {
@@ -249,7 +252,12 @@ int main(int argc, char **argv) {
     if (poll_fds[0].revents & POLLIN) {
         Conn* new_conn = accept_client(server_fd);
         if (new_conn) {
-            conns.push_back(new_conn);
+            // put it into the map
+            if (conns.size() <= (size_t)new_conn->fd) {
+                conns.resize(new_conn->fd + 1);
+            }
+            assert(!conns[new_conn->fd]);
+            conns[new_conn->fd] = new_conn;
         }
     }
 
@@ -259,15 +267,7 @@ int main(int argc, char **argv) {
         if (pfd.revents == 0) continue;  // No events for this fd
         
         // Find the corresponding connection
-        Conn* conn = nullptr;
-        for (Conn* c : conns) {
-            if (c && c->fd == pfd.fd) {
-                conn = c;
-                break;
-            }
-        }
-        
-        if (!conn) continue;  // Connection not found
+        Conn *conn = conns[poll_fds[i].fd];
         
         // Handle readable socket
         if (pfd.revents & POLLIN) {
@@ -282,33 +282,12 @@ int main(int argc, char **argv) {
         // Handle errors or close request
         if ((pfd.revents & POLLERR) || conn->want_close) {
             // Close the connection
-            close(conn->fd);
-            
-            // Remove from connections vector
-            for (size_t j = 0; j < conns.size(); j++) {
-                if (conns[j] == conn) {
-                    delete conn;
-                    conns[j] = nullptr;
-                    break;
-                }
-            }
+            (void)close(conn->fd);
+            conns[conn->fd] = NULL;
+            delete conn;
         }
     }
-    
-    // Clean up null connections
-    auto it = std::remove_if(conns.begin(), conns.end(), 
-                            [](Conn* c) { return c == nullptr; });
-    conns.erase(it, conns.end());
-  }
-
-  // Clean up
-  for (Conn* conn : conns) {
-      if (conn) {
-          close(conn->fd);
-          delete conn;
-      }
   }
   
-  close(server_fd);
   return 0;
 }
