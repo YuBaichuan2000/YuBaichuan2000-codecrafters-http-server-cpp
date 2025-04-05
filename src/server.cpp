@@ -93,7 +93,7 @@ std::string generate_response(const std::string& client_msg) {
 }
 
 bool try_process_request(Conn* conn) {
-  size_t header_end = conn->incoming.find("/r/n/r/n");
+  size_t header_end = conn->incoming.find("\r\n\r\n");
 
   // We have a complete HTTP request
     std::string request = conn->incoming;
