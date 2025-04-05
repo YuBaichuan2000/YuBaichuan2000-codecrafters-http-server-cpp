@@ -89,8 +89,6 @@ std::string get_agent(std::string request) {
   return agent;
 }
 
-
-
 // set socket to non-blocking mode
 void set_nonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
@@ -142,9 +140,7 @@ std::string generate_response(const std::string& client_msg) {
       }
       return "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " 
              + std::to_string(content.length()) + "\r\n\r\n" + content;
-    } else {
-      return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
-    }
+    } 
   } else if (split_paths.size() > 1 && split_paths[1] == "user-agent") {
     return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
            + std::to_string(agent.length()) + "\r\n\r\n" + agent;
