@@ -11,7 +11,8 @@
 #include <netdb.h>
 #include <sstream>
 #include <assert.h>
-#include <map> // Added for using a map instead of a vector for connections
+#include <map>
+#include <fstream>
 
 std::vector<std::string> split_message(const std::string &message, const std::string& delim) {
   std::vector<std::string> tokens;
@@ -47,6 +48,34 @@ std::string get_path(std::string request) {
   return path_toks[1];
 }
 
+std::string get_file(std::string request) {
+  // Added safety checks
+  std::vector<std::string> toks = split_message(request, "\r\n");
+  if (toks.empty()) {
+    return "/"; // Default path if no request line
+  }
+  
+  std::vector<std::string> path_toks = split_message(toks[0], " ");
+  if (path_toks.size() < 2) {
+    return "/"; // Default path if no path token
+  }
+
+  std::string filename = path_toks[1].substr(7);
+  std::string filepath = "/tmp/" + filename;
+
+  // Read and return the file content
+  std::ifstream file(filepath, std::ios::binary);
+  if (!file) {
+      return ""; // File not found or couldn't be opened
+  }
+  
+  // Read the entire file content into a string
+  std::stringstream buffer;
+  buffer << file.rdbuf();
+  
+  return buffer.str();
+}
+
 std::string get_agent(std::string request) {
   std::vector<std::string> toks = split_message(request, "\r\n");
   std::string agent;
@@ -59,6 +88,8 @@ std::string get_agent(std::string request) {
   }
   return agent;
 }
+
+
 
 // set socket to non-blocking mode
 void set_nonblocking(int fd) {
@@ -101,6 +132,18 @@ std::string generate_response(const std::string& client_msg) {
              + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
     } else {
       return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
+    }
+  } else if (split_paths.size() > 1 && split_paths[1] == "files") {
+    if (split_paths.size() > 2) {
+      // This is a file request
+      std::string content = get_file(client_msg);
+      if (content.empty()) {
+        return "HTTP/1.1 404 Not Found\r\n\r\n";
+      }
+      return "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " 
+             + std::to_string(content.length()) + "\r\n\r\n" + content;
+    } else {
+      return "HTTP/1.1 404 Not Found\r\n\r\n";
     }
   } else if (split_paths.size() > 1 && split_paths[1] == "user-agent") {
     return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
