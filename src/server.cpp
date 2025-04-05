@@ -117,17 +117,22 @@ std::string get_agent(std::string request) {
   return agent;
 }
 
-std::string get_encoding(std::string request) {
+bool get_encoding(std::string request) {
   std::vector<std::string> toks = split_message(request, "\r\n");
-  std::string encoding;
+  std::string encodings;
 
   for (std::string tok : toks) {
     if (tok.find("Accept-Encoding: ") == 0) {
-      encoding = tok.substr(17);
+      encodings = tok.substr(17);
       break;
     }
   }
-  return encoding;
+
+  if (encodings.find("gzip") != std::string::npos) {
+    return true;
+  } 
+  return false;
+  
 }
 
 std::string get_method(std::string request) {
@@ -178,8 +183,7 @@ std::string generate_response(const std::string& client_msg) {
   std::string path = get_path(client_msg);
   std::string agent = get_agent(client_msg);
   std::string method = get_method(client_msg);
-  std::string encoding = get_encoding(client_msg);
-  bool supports_gzip = encoding == "gzip";
+  bool supports_gzip = get_encoding(client_msg);
   std::vector<std::string> split_paths = split_message(path, "/");
   
   std::cout << "Received path: " << path << std::endl;
