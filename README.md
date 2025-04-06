@@ -1,38 +1,31 @@
-[![progress-banner](https://backend.codecrafters.io/progress/http-server/f4bf7d9f-e46d-4142-afb7-13ea3f2b0023)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+# Simple HTTP Server
 
-This is a starting point for C++ solutions to the
-["Build Your Own HTTP server" Challenge](https://app.codecrafters.io/courses/http-server/overview).
+## Technical Skills Demonstrated
 
-[HTTP](https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol) is the
-protocol that powers the web. In this challenge, you'll build a HTTP/1.1 server
-that is capable of serving multiple clients.
+### Network & Socket Programming
+- Implemented TCP server using POSIX socket API
+- Applied non-blocking I/O with `fcntl()`
+- Used `setsockopt()` for socket configuration (SO_REUSEADDR)
 
-Along the way you'll learn about TCP servers,
-[HTTP request syntax](https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html),
-and more.
+### TCP Server Architecture
+- Built complete HTTP request/response lifecycle
+- Managed concurrent client connections
+- Created clean connection state abstraction
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+### Event Loop Pattern
+- Used `poll()` for I/O multiplexing
+- Implemented non-blocking event-driven architecture
+- Applied reactor pattern for handling I/O events
 
-# Passing the first stage
+### HTTP Protocol Features
+- Parsed HTTP requests and generated proper responses
+- Supported GET and POST methods
+- Implemented path-based routing
+- Added content compression with gzip
+- Handled file operations (read/write)
 
-The entry point for your HTTP server implementation is in `src/server.cpp`.
-Study and uncomment the relevant code, and push your changes to pass the first
-stage:
-
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
-```
-
-Time to move on to the next stage!
-
-# Stage 2 & beyond
-
-Note: This section is for stages 2 and beyond.
-
-1. Ensure you have `cmake` installed locally
-1. Run `./your_program.sh` to run your program, which is implemented in
-   `src/server.cpp`.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+### Key Implementation Details
+- Connection state management
+- Error handling for network operations
+- Command-line configuration
+- HTTP header parsing and generation
